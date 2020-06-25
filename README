@@ -1,12 +1,12 @@
 
 
-        ██╗████╗██╗██╗
-        ╚███╔██║╚███╔╝
-         ██╔╝══╝██╔██╗
-         ██║   ██╔╝ ██╗
-         ╚═╝   ╚═╝  ╚═╝
+        ██ ████ ██ ██
+         ███ ██  ███
+         ██     ██ ██
+         ██    ██   ██
 
-    `rx` is a modern pixel editor implemented in rust.
+
+    `rx` is a modern and minimalist pixel editor.
 
   Designed with great care and love
     with pixel artists and animators in mind.
@@ -14,135 +14,67 @@
 OVERVIEW
 
   `rx` is an extensible, modern and minimalist pixel editor implemented
-  in rust[0]. It's designed to have as little UI as possible, and instead
-  takes inspiration from vi's[1] modal nature and command mode.
+  in rust[0]. rx is free software, licensed under the GPLv3.
 
-  Compared to other pixel editors, rx aims to be smaller, yet more configurable
-  and extendable. `rx` takes a different approach when it comes to animation
-  as well, which is done with *strips*.
+  Most of the information on how to use rx is on the website:
+  https://rx.cloudhead.io. There, you can also find a user guide
+  (https://rx.cloudhead.io/guide.html), installation instructions,
+  and binary download links.
 
-  See the screenshots/ folder to get an idea of what this looks like.
+  To build rx from source, see the build sections below.
+
+  Once inside rx, enter the `:help` command to get a list of key bindings
+  and commands.
 
   [0]: https://rust-lang.org
-  [1]: https://en.wikipedia.org/wiki/Vi
 
-GOALS
+REQUIREMENTS
 
-  * Minimal UI. Clean aesthetics. No clutter.
-  * Everything that should be controlled by the keyboard, is.
-  * Extensible and scriptable with a simple command-based language.
-  * Familiar to anyone with vi(m) knowledge.
-  * Snappy. No perceptible input lag when painting. All commands run in < 16ms.
-  * Optimized for advanced users. No hand-holding. vi-like philosophy.
-  * Small, hackable codebase. At most 10 KLOC with only a handful of direct dependencies.
-  * First-class Linux support.
-  * CPU & memory efficient.
-
-FEATURES
-
-  * Built-in sprite animation support, with live preview.
-  * Work with multiple files simultaneously.
-  * Extensible command system.
-  * Text-based configuration.
-  * Built using modern graphics.
-  * HiDPI display support.
-  * UI scaling.
-  * Undo/redo any edit.
-  * PNG support.
-  * Animated GIF output.
-  * Multi-brush / synchronous editing.
-  * Brush filtering a.k.a. "pixel-perfect" mode.
-
-  * (Coming soon: Layers)
-  * (Coming soon: Visual mode)
-  * (Coming soon: Workspaces)
-
-PLATFORM SUPPORT
-
-  * Linux     (vulkan)         [GOOD]
-  * macOS     (metal)          [GOOD]
-  * Windows   (vulkan)         [OKAY]
+  At a minimum, OpenGL 3.3 support is required.
 
 BUILD DEPENDENCIES
 
   * rust (https://www.rust-lang.org/tools/install)
   * cmake (https://cmake.org/download/)
 
-  macOS
-
-    * `Xcode` and the `Xcode Command Line Tools` are required.
-      The latter can be obtained by running `xcode-select --install`
-    * CMake might be required. You can install it with `brew install cmake`.
+  On macOS, `Xcode` and the `Xcode Command Line Tools` are required.
+  The latter can be obtained by running `xcode-select --install`
+  CMake can be installed with `brew install cmake`.
 
 BUILD & INSTALLATION
 
   Before proceeding, make sure the BUILD DEPENDENCIES have been installed.
 
-  Then, run:
+  Then, clone this repository and from its root, run:
 
-    $ cargo install --git https://github.com/cloudhead/rx --locked --features <backend>
+    $ cargo install --locked --path .
 
-  where <backend> is either 'vulkan' or 'metal'.  See the PLATFORM
-  SUPPORT section for which feature to enable on your platform.
+  This will install rx under `~/.cargo/bin/rx`.  If you prefer a different
+  install location, you can specify it via the `--root <prefix>` flag, where
+  <prefix> is for example '/usr/local'.
 
-  This will download `rx` and install it under `~/.cargo/bin/rx`.
-  If you prefer a different install location, you can specify it
-  via the `--root <prefix>` flag, where <prefix> is for example
-  '/usr/local'.
+CONTRIBUTING
 
-CONFIGURATION
-
-  Configuring `rx` involves editing the `init.rx` script, which is found in a
-  platform-dependent location. On Linux, this is in the XDG config directory,
-  eg. `~/.config/rx/init.rx`, while on macOS this is in the
-  `~/Library/Preferences` folder. If a config file isn't found, the default
-  configuration (`config/init.rx`) will be written.
-
-  To get the exact location of the config directory, enter `:echo config/dir`
-  from inside `rx`.
+  See the CONTRIBUTING file for details. Contributions are appreciated.
 
 USAGE
 
-  After installing, simply run `rx` from a shell or application launcher.
-
-  You can then use the :help command to show the default set of key mappings
-  and commands.
-
-  Common commands:
-
-    :help                    Display help
-    :e <path..>              Edit path(s)
-    :w                       Write/save view
-    :q                       Quit view
-    :slice <n>               Slice view into <n> frames
-    :source <path>           Source an rx script (eg. a palette)
-    :f/resize <w> <h>        Resize frames
-
-  For example, to create a 32x32 sprite with 4 frames:
-
-    1. Open `rx`.
-    2. Type `:f/resize 32 32`.
-    3. Press <return> three times to create a total of four frames.
-    4. Zoom in/out with `.` and `,`.
-    5. Draw something great!
-    6. Type `:w animation.png` to save it.
-
-SUPPORT
-
-  If you find this project useful, consider supporting it by sending ₿ (Bitcoin) to
-  the following address:
-
-    1MpF7p9A8LJabZn7ehHpGbLcN5PCXRdGqm
+  See the guide at https://rx.cloudhead.io/guide.html.
 
 TROUBLESHOOTING
 
-  If something ain't working like it's supposed to, there are various things you can
-  do to debug the problem:
+  If something isn't working like it's supposed to, there are various things
+  you can do to debug the problem:
 
-  1. Run `rx` with verbose logging, by using the `-v` command-line flag. This
-  will log errors from the underlying libraries that are usually suppressed.
-  You can increase the verbosity further by using `-vv`.
-  2. Try the `winit` backend, by building `rx` with eg. `--features winit,vulkan`.
+  * Run `rx` with verbose logging, by using the `-v` command-line flag. This
+    will log errors from the underlying libraries that are usually suppressed,
+    and will show debug output that might indicate what the problem is.
+  * If `rx` is crashing, run it with `RUST_BACKTRACE=1` set in your environment
+    to show a backtrace on crash.
+  * It could be that the issue is related to your configuration - in that case
+    the program can be run without loading the initialization script like so:
+
+        rx -u -
 
 LICENSE
 
@@ -150,4 +82,4 @@ LICENSE
 
 COPYRIGHT
 
-  (c) 2019 Alexis Sellier <self@cloudhead.io>
+  (c) 2019 Alexis Sellier

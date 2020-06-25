@@ -1,0 +1,15 @@
+set ui/message = off
+set ui/status = off
+set ui/view-info = off
+set ui/switcher = off
+set ui/cursor = off
+set ui/palette = off
+
+set input/mouse = off
+
+map         ;           :mode command
+map         z           :v/center
+map         .           :zoom +
+map         ,           :zoom -
+map         j           :v/prev
+map         k           :v/next

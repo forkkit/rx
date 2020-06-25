@@ -1,38 +1,13 @@
-use rgx::core as gfx;
-use rgx::core::Rect;
 use rgx::kit::sprite2d;
-use rgx::kit::{Repeat, Rgba8};
+use rgx::kit::{Repeat, Rgba8, ZDepth};
+use rgx::rect::Rect;
 
-pub struct Font {
-    gw: f32,
-    gh: f32,
+#[cfg(feature = "wgpu")]
+use rgx::core::Renderable;
 
-    width: f32,
-    height: f32,
-
-    pub binding: gfx::BindingGroup,
-    pub texture: gfx::Texture,
-}
-
-impl Font {
-    pub fn new(
-        texture: gfx::Texture,
-        binding: gfx::BindingGroup,
-        gw: f32,
-        gh: f32,
-    ) -> Font {
-        let width = texture.w as f32;
-        let height = texture.h as f32;
-
-        Font {
-            gw,
-            gh,
-            width,
-            height,
-            texture,
-            binding,
-        }
-    }
+pub enum TextAlign {
+    Left,
+    Right,
 }
 
 pub struct TextBatch {
@@ -42,29 +17,43 @@ pub struct TextBatch {
 }
 
 impl TextBatch {
-    pub fn new(f: &Font) -> Self {
-        let raw = sprite2d::Batch::new(f.width as u32, f.height as u32);
+    pub fn new(w: u32, h: u32, gw: f32, gh: f32) -> Self {
+        let raw = sprite2d::Batch::new(w, h);
 
-        Self {
-            raw,
-            gw: f.gw,
-            gh: f.gh,
-        }
+        Self { raw, gw, gh }
     }
 
-    pub fn add(&mut self, text: &str, mut sx: f32, sy: f32, color: Rgba8) {
-        let offset: f32 = 32.;
+    pub fn add(
+        &mut self,
+        text: &str,
+        mut sx: f32,
+        sy: f32,
+        z: ZDepth,
+        color: Rgba8,
+        align: TextAlign,
+    ) {
+        let offset: usize = 32;
 
         let gw = self.gw;
         let gh = self.gh;
         let rgba = color.into();
 
+        match align {
+            TextAlign::Left => {}
+            TextAlign::Right => {
+                sx -= gw * text.chars().count() as f32;
+            }
+        }
+
         for c in text.bytes().into_iter() {
-            let x: f32 = (c as f32 - offset) * gw;
+            let i: usize = c as usize - offset;
+            let x: f32 = (i % 16) as f32 * gw;
+            let y: f32 = (i / 16) as f32 * gh;
 
             self.raw.add(
-                Rect::new(x, 0., x + gw, gh),
+                Rect::new(x, y, x + gw, y + gh),
                 Rect::new(sx, sy, sx + gw, sy + gh),
+                z,
                 rgba,
                 1.0,
                 Repeat::default(),
@@ -73,7 +62,40 @@ impl TextBatch {
         }
     }
 
-    pub fn finish(self, r: &gfx::Renderer) -> gfx::VertexBuffer {
+    pub fn offset(&mut self, x: f32, y: f32) {
+        self.raw.offset(x, y);
+    }
+
+    pub fn glyph(&mut self, glyph: usize, sx: f32, sy: f32, z: ZDepth, color: Rgba8) {
+        let gw = self.gw;
+        let gh = self.gh;
+        let rgba = color.into();
+
+        let i: usize = glyph;
+        let x: f32 = (i % 16) as f32 * gw;
+        let y: f32 = (i / 16) as f32 * gh;
+
+        self.raw.add(
+            Rect::new(x, y, x + gw, y + gh),
+            Rect::new(sx, sy, sx + gw, sy + gh),
+            z,
+            rgba,
+            1.0,
+            Repeat::default(),
+        );
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn finish(self, r: &rgx::core::Renderer) -> rgx::core::VertexBuffer {
         self.raw.finish(r)
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    pub fn vertices(&self) -> Vec<sprite2d::Vertex> {
+        self.raw.vertices()
+    }
+
+    pub fn clear(&mut self) {
+        self.raw.clear()
     }
 }

@@ -1,9 +1,11 @@
-use crate::kit::shape2d::{Fill, Shape, Stroke};
-use crate::kit::Origin;
+use crate::pixels::PixelsMut;
+use crate::view::layer::LayerCoords;
 use crate::view::{ViewCoords, ViewExtent};
 
-use rgx::core::{Rect, Rgba8};
+use rgx::kit::shape2d::{Fill, Rotation, Shape, Stroke};
+use rgx::kit::{Rgba8, ZDepth};
 use rgx::math::{Point2, Vector2};
+use rgx::rect::Rect;
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -34,6 +36,8 @@ pub enum BrushMode {
     XSym,
     /// Y-Symmetry mode.
     YSym,
+    /// X-Ray mode.
+    XRay,
 }
 
 impl fmt::Display for BrushMode {
@@ -44,12 +48,19 @@ impl fmt::Display for BrushMode {
             Self::Perfect => "perfect".fmt(f),
             Self::XSym => "xsym".fmt(f),
             Self::YSym => "ysym".fmt(f),
+            Self::XRay => "xray".fmt(f),
         }
     }
 }
 
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub enum Align {
+    Center,
+    BottomLeft,
+}
+
 /// Brush context.
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Brush {
     /// Brush size in pixels.
     pub size: usize,
@@ -98,6 +109,23 @@ impl Brush {
         self.modes.remove(&m)
     }
 
+    /// Toggle the given brush mode.
+    pub fn toggle(&mut self, m: BrushMode) {
+        if self.is_set(m) {
+            self.unset(m);
+        } else {
+            self.set(m);
+        }
+    }
+
+    /// Check whether the brush is currently drawing.
+    pub fn is_drawing(&self) -> bool {
+        match self.state {
+            BrushState::NotDrawing => false,
+            _ => true,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.modes.clear();
@@ -112,12 +140,7 @@ impl Brush {
     }
 
     /// Start drawing. Called when input is first pressed.
-    pub fn start_drawing(
-        &mut self,
-        p: ViewCoords<i32>,
-        color: Rgba8,
-        extent: ViewExtent,
-    ) {
+    pub fn start_drawing(&mut self, p: LayerCoords<i32>, color: Rgba8, extent: ViewExtent) {
         self.state = BrushState::DrawStarted(extent);
         self.color = color;
         self.stroke = Vec::with_capacity(32);
@@ -125,7 +148,7 @@ impl Brush {
     }
 
     /// Draw. Called while input is pressed.
-    pub fn draw(&mut self, p: ViewCoords<i32>) {
+    pub fn draw(&mut self, p: LayerCoords<i32>) {
         self.prev = if let BrushState::DrawStarted(_) = self.state {
             *p
         } else {
@@ -160,11 +183,7 @@ impl Brush {
     }
 
     /// Expand a point into all brush heads.
-    pub fn expand(
-        &self,
-        p: ViewCoords<i32>,
-        extent: ViewExtent,
-    ) -> Vec<ViewCoords<i32>> {
+    pub fn expand(&self, p: ViewCoords<i32>, extent: ViewExtent) -> Vec<ViewCoords<i32>> {
         let mut pixels = vec![*p];
         let ViewExtent { fw, fh, nframes } = extent;
 
@@ -173,9 +192,7 @@ impl Brush {
                 let frame_index = p.x / fw as i32;
 
                 pixels.push(Point2::new(
-                    (frame_index + 1) * fw as i32
-                        - (p.x - frame_index * fw as i32)
-                        - 1,
+                    (frame_index + 1) * fw as i32 - (p.x - frame_index * fw as i32) - 1,
                     p.y,
                 ));
             }
@@ -198,13 +215,7 @@ impl Brush {
     }
 
     /// Return the brush's output strokes as shapes.
-    pub fn output(
-        &self,
-        stroke: Stroke,
-        fill: Fill,
-        scale: f32,
-        origin: Origin,
-    ) -> Vec<Shape> {
+    pub fn output(&self, stroke: Stroke, fill: Fill, scale: f32, align: Align) -> Vec<Shape> {
         match self.state {
             BrushState::DrawStarted(extent)
             | BrushState::Drawing(extent)
@@ -213,8 +224,7 @@ impl Brush {
 
                 for p in &self.stroke {
                     pixels.extend_from_slice(
-                        self.expand(ViewCoords::new(p.x, p.y), extent)
-                            .as_slice(),
+                        self.expand(ViewCoords::new(p.x, p.y), extent).as_slice(),
                     );
                 }
                 pixels
@@ -222,10 +232,11 @@ impl Brush {
                     .map(|p| {
                         self.shape(
                             Point2::new(p.x as f32, p.y as f32),
+                            ZDepth::ZERO,
                             stroke,
                             fill,
                             scale,
-                            origin,
+                            align,
                         )
                     })
                     .collect()
@@ -241,25 +252,26 @@ impl Brush {
     pub fn shape(
         &self,
         p: Point2<f32>,
+        z: ZDepth,
         stroke: Stroke,
         fill: Fill,
         scale: f32,
-        origin: Origin,
+        align: Align,
     ) -> Shape {
         let x = p.x;
         let y = p.y;
 
         let size = self.size as f32;
 
-        let offset = match origin {
-            Origin::Center => size * scale / 2.,
-            Origin::BottomLeft => (self.size / 2) as f32 * scale,
-            Origin::TopLeft => unreachable!(),
+        let offset = match align {
+            Align::Center => size * scale / 2.,
+            Align::BottomLeft => (self.size / 2) as f32 * scale,
         };
 
         Shape::Rectangle(
-            Rect::new(x, y, x + size * scale, y + size * scale)
-                - Vector2::new(offset, offset),
+            Rect::new(x, y, x + size * scale, y + size * scale) - Vector2::new(offset, offset),
+            z,
+            Rotation::ZERO,
             stroke,
             fill,
         )
@@ -268,11 +280,7 @@ impl Brush {
     ///////////////////////////////////////////////////////////////////////////
 
     /// Draw a line between two points. Uses Bresenham's line algorithm.
-    fn line(
-        mut p0: Point2<i32>,
-        p1: Point2<i32>,
-        canvas: &mut Vec<Point2<i32>>,
-    ) {
+    fn line(mut p0: Point2<i32>, p1: Point2<i32>, canvas: &mut Vec<Point2<i32>>) {
         let dx = i32::abs(p1.x - p0.x);
         let dy = i32::abs(p1.y - p0.y);
         let sx = if p0.x < p1.x { 1 } else { -1 };
@@ -301,36 +309,173 @@ impl Brush {
         }
     }
 
+    /// Paint a circle into a pixel buffer.
+    #[allow(dead_code)]
+    fn paint(
+        pixels: &mut [Rgba8],
+        w: usize,
+        h: usize,
+        position: Point2<f32>,
+        diameter: f32,
+        color: Rgba8,
+    ) {
+        let mut grid = PixelsMut::new(pixels, w, h);
+        let bias = if diameter <= 2. {
+            0.0
+        } else if diameter <= 3. {
+            0.5
+        } else {
+            0.0
+        };
+        let radius = diameter / 2. - bias;
+
+        for (x, y, c) in grid.iter_mut() {
+            let (x, y) = (x as f32, y as f32);
+
+            let dx = (x - position.x).abs();
+            let dy = (y - position.y).abs();
+            let d = (dx.powi(2) + dy.powi(2)).sqrt();
+
+            if d <= radius {
+                *c = color;
+            }
+        }
+    }
+
     /// Filter a brush stroke to remove 'L' shapes. This is often called
     /// *pixel perfect* mode.
     fn filter(stroke: &[Point2<i32>]) -> Vec<Point2<i32>> {
         let mut filtered = Vec::with_capacity(stroke.len());
 
-        if stroke.len() <= 2 {
-            return stroke.to_owned();
-        }
+        filtered.extend(stroke.first().cloned());
 
-        let mut iter = (0..stroke.len()).into_iter();
-        if let Some(i) = iter.next() {
-            filtered.push(stroke[i]);
-        }
-        while let Some(i) = iter.next() {
-            let p = stroke[i];
-
-            if let Some(prev) = stroke.get(i - 1) {
-                if let Some(next) = stroke.get(i + 1) {
-                    if (prev.y == p.y && next.y != p.y && next.x == p.x)
-                        || (prev.x == p.x && next.x != p.x && next.y == p.y)
-                    {
-                        if let Some(i) = iter.next() {
-                            filtered.push(stroke[i]);
-                        }
-                        continue;
-                    }
-                }
+        let mut triples = stroke.windows(3);
+        while let Some(triple) = triples.next() {
+            let (prev, curr, next) = (triple[0], triple[1], triple[2]);
+            if (prev.y == curr.y && next.x == curr.x) || (prev.x == curr.x && next.y == curr.y) {
+                filtered.push(next);
+                triples.next();
+            } else {
+                filtered.push(curr);
             }
-            filtered.push(p);
         }
+
+        filtered.extend(stroke.last().cloned());
+
         filtered
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_paint() {
+        let z = Rgba8::TRANSPARENT;
+        let w = Rgba8::WHITE;
+
+        #[rustfmt::skip]
+        let brush1 = vec![
+            z, z, z,
+            z, w, z,
+            z, z, z,
+        ];
+
+        #[rustfmt::skip]
+        let brush2 = vec![
+            z, z, z, z,
+            z, w, w, z,
+            z, w, w, z,
+            z, z, z, z,
+        ];
+
+        #[rustfmt::skip]
+        let brush3 = vec![
+            z, z, z, z, z,
+            z, z, w, z, z,
+            z, w, w, w, z,
+            z, z, w, z, z,
+            z, z, z, z, z,
+        ];
+
+        #[rustfmt::skip]
+        let brush5 = vec![
+            z, z, z, z, z, z, z,
+            z, z, w, w, w, z, z,
+            z, w, w, w, w, w, z,
+            z, w, w, w, w, w, z,
+            z, w, w, w, w, w, z,
+            z, z, w, w, w, z, z,
+            z, z, z, z, z, z, z,
+        ];
+
+        #[rustfmt::skip]
+        let brush7 = vec![
+            z, z, z, z, z, z, z, z, z,
+            z, z, z, w, w, w, z, z, z,
+            z, z, w, w, w, w, w, z, z,
+            z, w, w, w, w, w, w, w, z,
+            z, w, w, w, w, w, w, w, z,
+            z, w, w, w, w, w, w, w, z,
+            z, z, w, w, w, w, w, z, z,
+            z, z, z, w, w, w, z, z, z,
+            z, z, z, z, z, z, z, z, z
+        ];
+
+        #[rustfmt::skip]
+        let brush15 = vec![
+            z, z, z, z, z, w, w, w, w, w, z, z, z, z, z,
+            z, z, z, w, w, w, w, w, w, w, w, w, z, z, z,
+            z, z, w, w, w, w, w, w, w, w, w, w, w, z, z,
+            z, w, w, w, w, w, w, w, w, w, w, w, w, w, z,
+            z, w, w, w, w, w, w, w, w, w, w, w, w, w, z,
+            w, w, w, w, w, w, w, w, w, w, w, w, w, w, w,
+            w, w, w, w, w, w, w, w, w, w, w, w, w, w, w,
+            w, w, w, w, w, w, w, w, w, w, w, w, w, w, w,
+            w, w, w, w, w, w, w, w, w, w, w, w, w, w, w,
+            w, w, w, w, w, w, w, w, w, w, w, w, w, w, w,
+            z, w, w, w, w, w, w, w, w, w, w, w, w, w, z,
+            z, w, w, w, w, w, w, w, w, w, w, w, w, w, z,
+            z, z, w, w, w, w, w, w, w, w, w, w, w, z, z,
+            z, z, z, w, w, w, w, w, w, w, w, w, z, z, z,
+            z, z, z, z, z, w, w, w, w, w, z, z, z, z, z,
+        ];
+
+        {
+            let mut canvas = vec![Rgba8::TRANSPARENT; 3 * 3];
+            Brush::paint(&mut canvas, 3, 3, Point2::new(1., 1.), 1., Rgba8::WHITE);
+            assert_eq!(canvas, brush1);
+        }
+
+        {
+            let mut canvas = vec![Rgba8::TRANSPARENT; 4 * 4];
+            Brush::paint(&mut canvas, 4, 4, Point2::new(1.5, 1.5), 2., Rgba8::WHITE);
+            assert_eq!(canvas, brush2);
+        }
+
+        {
+            let mut canvas = vec![Rgba8::TRANSPARENT; 5 * 5];
+            Brush::paint(&mut canvas, 5, 5, Point2::new(2., 2.), 3., Rgba8::WHITE);
+            assert_eq!(canvas, brush3);
+        }
+
+        {
+            let mut canvas = vec![Rgba8::TRANSPARENT; 7 * 7];
+            Brush::paint(&mut canvas, 7, 7, Point2::new(3., 3.), 5., Rgba8::WHITE);
+            assert_eq!(canvas, brush5);
+        }
+
+        {
+            let mut canvas = vec![Rgba8::TRANSPARENT; 9 * 9];
+            Brush::paint(&mut canvas, 9, 9, Point2::new(4., 4.), 7., Rgba8::WHITE);
+            assert_eq!(canvas, brush7);
+        }
+
+        {
+            let mut canvas = vec![Rgba8::TRANSPARENT; 15 * 15];
+            Brush::paint(&mut canvas, 15, 15, Point2::new(7., 7.), 15., Rgba8::WHITE);
+            assert_eq!(canvas, brush15);
+        }
     }
 }

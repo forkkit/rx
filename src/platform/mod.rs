@@ -3,35 +3,35 @@ use std::io;
 
 use std::fmt;
 
-#[cfg(not(any(feature = "winit", feature = "glfw")))]
+#[cfg(not(feature = "glfw"))]
 #[path = "dummy.rs"]
-mod backend;
+pub mod backend;
 
-#[cfg(feature = "winit")]
-#[path = "winit.rs"]
-mod backend;
-
-#[cfg(all(feature = "glfw", not(feature = "winit")))]
+#[cfg(feature = "glfw")]
 #[path = "glfw.rs"]
-mod backend;
+pub mod backend;
 
 /// Initialize the platform.
-pub fn init(title: &str) -> io::Result<(backend::Window, backend::Events)> {
-    backend::init(title)
+pub fn init(
+    title: &str,
+    w: u32,
+    h: u32,
+    hints: &[WindowHint],
+    context: GraphicsContext,
+) -> io::Result<(backend::Window, backend::Events)> {
+    backend::init(title, w, h, hints, context)
 }
 
-/// Run the main event loop.
-pub fn run<F>(win: backend::Window, events: backend::Events, callback: F)
-where
-    F: 'static + FnMut(&mut backend::Window, WindowEvent) -> ControlFlow,
-{
-    backend::run(win, events, callback);
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum GraphicsContext {
+    None,
+    Gl,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum ControlFlow {
-    Continue,
-    Exit,
+#[derive(Debug, Copy, Clone)]
+pub enum WindowHint {
+    Resizable(bool),
+    Visible(bool),
 }
 
 /// Describes an event from a `Window`.
@@ -56,7 +56,7 @@ pub enum WindowEvent {
     Destroyed,
 
     /// The window received a unicode character.
-    ReceivedCharacter(char),
+    ReceivedCharacter(char, ModifiersState),
 
     /// The window gained or lost focus.
     Focused(bool),
@@ -76,12 +76,15 @@ pub enum WindowEvent {
     /// The cursor has left the window.
     CursorLeft,
 
-    /// An mouse button press has been received.
+    /// A mouse button press has been received.
     MouseInput {
         state: InputState,
         button: MouseButton,
         modifiers: ModifiersState,
     },
+
+    /// The mouse wheel has been used.
+    MouseWheel { delta: LogicalDelta },
 
     /// The OS or application has requested that the window be redrawn.
     RedrawRequested,
@@ -89,8 +92,9 @@ pub enum WindowEvent {
     /// There are no more inputs to process, the application can do work.
     Ready,
 
-    /// The DPI factor of the window has changed.
-    HiDpiFactorChanged(f64),
+    /// The content scale factor of the window has changed.  For example,
+    /// the window was moved to a higher DPI screen.
+    ScaleFactorChanged(f64),
 
     /// No-op event, for events we don't handle.
     Noop,
@@ -106,14 +110,14 @@ impl WindowEvent {
             | Self::Restored
             | Self::CloseRequested
             | Self::Destroyed
-            | Self::ReceivedCharacter(_)
+            | Self::ReceivedCharacter(_, _)
             | Self::Focused(_)
             | Self::KeyboardInput(_)
             | Self::CursorMoved { .. }
             | Self::CursorEntered
             | Self::CursorLeft
             | Self::MouseInput { .. }
-            | Self::HiDpiFactorChanged(_) => true,
+            | Self::ScaleFactorChanged(_) => true,
             _ => false,
         }
     }
@@ -132,6 +136,7 @@ pub struct KeyboardInput {
 pub enum InputState {
     Pressed,
     Released,
+    Repeated,
 }
 
 /// Describes a mouse button.
@@ -197,6 +202,7 @@ impl From<char> for Key {
             '`' => Key::Grave, ',' => Key::Comma, '.' => Key::Period,
             '=' => Key::Equal, '-' => Key::Minus, '\'' => Key::Apostrophe,
             ';' => Key::Semicolon, ':' => Key::Colon, ' ' => Key::Space,
+            '\\' => Key::Backslash,
             _ => Key::Unknown,
         }
     }
@@ -277,6 +283,15 @@ impl fmt::Display for Key {
     }
 }
 
+impl Key {
+    pub fn is_modifier(self) -> bool {
+        match self {
+            Key::Alt | Key::Control | Key::Shift => true,
+            _ => false,
+        }
+    }
+}
+
 /// Represents the current state of the keyboard modifiers
 #[derive(Default, Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct ModifiersState {
@@ -309,6 +324,13 @@ impl fmt::Display for ModifiersState {
     }
 }
 
+/// A delta represented in logical pixels.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct LogicalDelta {
+    pub x: f64,
+    pub y: f64,
+}
+
 /// A position represented in logical pixels.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct LogicalPosition {
@@ -321,16 +343,13 @@ impl LogicalPosition {
         LogicalPosition { x, y }
     }
 
-    pub fn from_physical<T: Into<PhysicalPosition>>(
-        physical: T,
-        dpi_factor: f64,
-    ) -> Self {
-        physical.into().to_logical(dpi_factor)
+    pub fn from_physical<T: Into<PhysicalPosition>>(physical: T, scale_factor: f64) -> Self {
+        physical.into().to_logical(self::pixel_ratio(scale_factor))
     }
 
-    pub fn to_physical(&self, dpi_factor: f64) -> PhysicalPosition {
-        let x = self.x * dpi_factor;
-        let y = self.y * dpi_factor;
+    pub fn to_physical(&self, scale_factor: f64) -> PhysicalPosition {
+        let x = self.x * self::pixel_ratio(scale_factor);
+        let y = self.y * self::pixel_ratio(scale_factor);
         PhysicalPosition::new(x, y)
     }
 }
@@ -347,16 +366,13 @@ impl PhysicalPosition {
         PhysicalPosition { x, y }
     }
 
-    pub fn from_logical<T: Into<LogicalPosition>>(
-        logical: T,
-        dpi_factor: f64,
-    ) -> Self {
-        logical.into().to_physical(dpi_factor)
+    pub fn from_logical<T: Into<LogicalPosition>>(logical: T, scale_factor: f64) -> Self {
+        logical.into().to_physical(self::pixel_ratio(scale_factor))
     }
 
-    pub fn to_logical(&self, dpi_factor: f64) -> LogicalPosition {
-        let x = self.x / dpi_factor;
-        let y = self.y / dpi_factor;
+    pub fn to_logical(&self, scale_factor: f64) -> LogicalPosition {
+        let x = self.x / self::pixel_ratio(scale_factor);
+        let y = self.y / self::pixel_ratio(scale_factor);
         LogicalPosition::new(x, y)
     }
 }
@@ -373,16 +389,13 @@ impl LogicalSize {
         LogicalSize { width, height }
     }
 
-    pub fn from_physical<T: Into<PhysicalSize>>(
-        physical: T,
-        dpi_factor: f64,
-    ) -> Self {
-        physical.into().to_logical(dpi_factor)
+    pub fn from_physical<T: Into<PhysicalSize>>(physical: T, scale_factor: f64) -> Self {
+        physical.into().to_logical(self::pixel_ratio(scale_factor))
     }
 
-    pub fn to_physical(&self, dpi_factor: f64) -> PhysicalSize {
-        let width = self.width * dpi_factor;
-        let height = self.height * dpi_factor;
+    pub fn to_physical(&self, scale_factor: f64) -> PhysicalSize {
+        let width = self.width * self::pixel_ratio(scale_factor);
+        let height = self.height * self::pixel_ratio(scale_factor);
         PhysicalSize::new(width, height)
     }
 
@@ -416,16 +429,13 @@ impl PhysicalSize {
         PhysicalSize { width, height }
     }
 
-    pub fn from_logical<T: Into<LogicalSize>>(
-        logical: T,
-        dpi_factor: f64,
-    ) -> Self {
-        logical.into().to_physical(dpi_factor)
+    pub fn from_logical<T: Into<LogicalSize>>(logical: T, scale_factor: f64) -> Self {
+        logical.into().to_physical(self::pixel_ratio(scale_factor))
     }
 
-    pub fn to_logical(&self, dpi_factor: f64) -> LogicalSize {
-        let width = self.width / dpi_factor;
-        let height = self.height / dpi_factor;
+    pub fn to_logical(&self, scale_factor: f64) -> LogicalSize {
+        let width = self.width / self::pixel_ratio(scale_factor);
+        let height = self.height / self::pixel_ratio(scale_factor);
         LogicalSize::new(width, height)
     }
 }
@@ -441,4 +451,24 @@ impl Into<(u32, u32)> for PhysicalSize {
     fn into(self) -> (u32, u32) {
         (self.width.round() as _, self.height.round() as _)
     }
+}
+
+/// The ratio between screen coordinates and pixels, given the
+/// content scale.
+/// On macOS, screen coordinates don't map 1:1 with pixels. Hence,
+/// our ratio between screen coordinates and pixels is whatever
+/// the scaling factor is, which is always `2.0` on modern hardware.
+#[cfg(target_os = "macos")]
+pub fn pixel_ratio(scale_factor: f64) -> f64 {
+    scale_factor
+}
+
+/// The ratio between screen coordinates and pixels, given the
+/// content scale.
+/// On Linux and Windows, screen coordinates always map 1:1 with pixels.
+/// No matter the DPI settings and display, we always want to map a screen
+/// coordinate with a single pixel.
+#[cfg(not(target_os = "macos"))]
+pub fn pixel_ratio(_scale_factor: f64) -> f64 {
+    1.0
 }

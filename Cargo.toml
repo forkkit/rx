@@ -1,36 +1,44 @@
 [package]
 name = "rx"
-version = "0.2.0"
+version = "0.4.0"
 description = "a modern, extensible pixel editor"
 license = "GPL-3.0-only"
 repository = "https://github.com/cloudhead/rx"
-homepage = "https://github.com/cloudhead/rx"
+homepage = "https://rx.cloudhead.io"
 authors = ["Alexis Sellier <self@cloudhead.io>"]
 edition = "2018"
 
 [features]
-default = ["glfw"]
-vulkan = ["rgx/vulkan"]
-metal = ["rgx/metal"]
-dx11 = ["rgx/dx11"]
-dx12 = ["rgx/dx12"]
+default = ["glfw", "luminance", "luminance-derive", "gl"]
+wgpu = ["glfw", "rgx/renderer"]
 
 [dependencies]
-clap = { version = "2.33.0", default-features = false }
-env_logger = { version = "0.6.2", default-features = false, features = ["termcolor"] }
+pico-args = "0.3.0"
+simple_logger = { version = "1.4.0", default-features = false }
 png = { version = "0.15.0" }
-gif = "0.10.2"
-glfw = { version = "0.32.0", optional = true }
-winit = { version = "0.20.0-alpha3", optional = true }
+gif = "0.10.3"
+glfw = { version = "0.36.0", optional = true }
+raw-window-handle = { version = "0.3.3", optional = true }
+zip = { version = "0.5.5", default-features = false, features = ["deflate", "flate2"] }
 snap = "0.2.5"
 log = "0.4.6"
 directories = "2.0.2"
-raw-window-handle = "0.1.0"
+seahash = "4.0.0"
+digest = "0.8.1"
+nonempty = "0.1.4"
+memoir = "0.2.1"
+toml = "0.5"
+serde = "1.0"
+serde_derive = "1.0"
+
+# Default features.
+luminance = { version = "0.38.0", optional = true }
+luminance-derive = { version = "0.5.0", optional = true }
+gl = { version = "0.14", optional = true }
 
 [dependencies.rgx]
-version = "0.1.7"
+version = "0.8.1"
 
-[patch.crates-io]
-# Rendy 0.4.0 has a bug which leads to texture corruption. We use a patched
-# fork while waiting for the new release to be published.
-rendy-memory = { version = "0.4.0", git = "https://github.com/cloudhead/rendy" }
+[dev-dependencies]
+lazy_static = "1.3"
+tempfile = "3"
